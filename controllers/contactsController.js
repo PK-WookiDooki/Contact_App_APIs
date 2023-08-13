@@ -1,24 +1,17 @@
-import { db } from "../index.js";
+const Contact = require("../models/Contact");
 
-export const getAllContacts = async (req, res) => {
-    try {
-        const q = "SELECT * FROM contacts ORDER BY id DESC ";
-        db.query(q, (err, data) => {
-            if (err)
-                return res.status(400).json({
-                    success: false,
-                    message: "Fail to get contacts from database!",
-                });
+const getAllContacts = async (req, res) => {
+    const contacts = await Contact.find().lean();
+    if (!contacts?.length)
+        return res
+            .status(400)
+            .json({ success: false, message: "No contacts found!" });
 
-            return res.json({ success: true, data: data });
-        });
-    } catch (error) {
-        throw new Error(error);
-    }
+    return res.json({ success: true, data: contacts });
 };
 
 //create new contact
-export const createNewContact = async (req, res) => {
+const createNewContact = async (req, res) => {
     try {
         const { name, phone, avatar, notes } = req.body;
 
@@ -29,35 +22,30 @@ export const createNewContact = async (req, res) => {
             });
         }
 
-        const findPhoneQ = "SELECT * FROM contacts WHERE `phone` = ?";
-        const q =
-            "INSERT INTO contacts (`name`, `phone`, `avatar`, `notes`) VALUES ( ? );";
+        const duplicate = await Contact.findOne({ phone }).lean().exec();
 
-        const contact = [name, phone, avatar, notes];
-        db.query(findPhoneQ, [phone], (err, data) => {
-            if (err) return res.json({ success: false, message: err });
-
-            if (data.length > 0)
-                return res.json({
-                    success: false,
-                    message: `Contact with phone number (${phone}) already existed!`,
-                });
-            db.query(q, [contact], (err, data) => {
-                if (err)
-                    return res
-                        .status(400)
-                        .json({ success: false, message: err });
-
-                return res.json({ success: true, data: data });
+        if (duplicate)
+            return res.status(409).json({
+                success: false,
+                message: `Contact with phone number ${phone} already existed!`,
             });
-        });
+
+        const contactObj = { name, phone, avatar, notes };
+        const contact = await Contact.create(contactObj);
+
+        if (!contact)
+            return res
+                .status(400)
+                .json({ success: false, message: "Invalid data received!" });
+
+        return res.json({ success: true, data: contact });
     } catch (error) {
         throw new Error(error);
     }
 };
 
 //update contact
-export const updateContact = async (req, res) => {
+const updateContact = async (req, res) => {
     try {
         const { id } = req.params;
         const { name, phone, avatar, notes, favorite } = req.body;
@@ -75,35 +63,30 @@ export const updateContact = async (req, res) => {
             });
         }
 
-        const findBlogQ = "SELECT * FROM blogs WHERE id = ?";
+        const contact = await Contact.findById(id).exec();
 
-        db.query(findBlogQ, [id], (err, data) => {
-            if (data.length < 0) {
-                return res.status(404).json({
-                    success: false,
-                    message: `Blog with ID ${id} not found!`,
-                });
-            } else {
-                const q =
-                    "UPDATE contacts SET `name` = ? , `phone` = ?, `avatar` = ?, `notes` = ?, `favorite` = ? WHERE id = ?";
+        if (!contact)
+            return res.status(404).json({
+                success: false,
+                message: `Contact with id ${id} not found!`,
+            });
 
-                db.query(
-                    q,
-                    [name, phone, avatar, notes, favorite, id],
-                    (err, data) => {
-                        if (err) throw new Error(err);
-                        return res.json({ success: true, data: data });
-                    }
-                );
-            }
-        });
+        contact.name = name;
+        contact.phone = phone;
+        contact.avatar = avatar;
+        contact.notes = notes;
+        contact.favorite = favorite;
+
+        //save updated contact in db
+        const updatedContact = await contact.save();
+        res.json({ success: true, data: updateContact });
     } catch (error) {
         throw new Error(error);
     }
 };
 
 //delete contact
-export const deleteContact = async (req, res) => {
+const deleteContact = async (req, res) => {
     const { id } = req.params;
 
     if (!id)
@@ -112,44 +95,22 @@ export const deleteContact = async (req, res) => {
             message: "ID is required to delete the contact!",
         });
 
-    const q = "DELETE FROM contacts WHERE id = ? ";
-    db.query(q, [id], (err, data) => {
-        if (err) return res.json({ success: false, message: err });
-        return res.json({
-            success: true,
-            message: `Contact ID ${id} has been deleted!`,
-        });
-    });
-};
-
-//handling favorite/unfavorite
-export const handleFavorite = async (req, res) => {
-    const { id } = req.params;
-
-    const { favorite } = req.body;
-
-    if (!id)
-        return res.status(400).json({
+    const contact = await Contact.findById(id).exec();
+    if (!contact)
+        return res.status(404).json({
             success: false,
-            message: "ID is required to update favorite!",
+            message: `Contact with id ${id} not found!`,
         });
 
-    const findContactQ = "SELECT * from contacts WHERE id = ?";
-    const updateQ = "UPDATE contacts SET `favorite` = ? WHERE id = ?";
-
-    db.query(findContactQ, [id], (err, data) => {
-        if (err) return res.json({ success: false, message: err });
-
-        db.query(updateQ, [favorite, id], (err, data) => {
-            if (err) return res.json({ success: false, message: err });
-
-            return res.json({ success: true, data: data });
-        });
+    const result = await contact.deleteOne();
+    return res.json({
+        success: true,
+        message: `Contact with id ${id} has been deleted!`,
     });
 };
 
 //get single contact
-export const getContactById = async (req, res) => {
+const getContactById = async (req, res) => {
     try {
         const { id } = req.params;
         if (!id)
@@ -157,18 +118,23 @@ export const getContactById = async (req, res) => {
                 .status(404)
                 .json({ success: false, message: "ID is required!" });
 
-        const q = "SELECT * FROM contacts WHERE id = ?";
+        const contact = await Contact.findById(id).exec();
+        if (!contact)
+            return res.status(404).json({
+                success: false,
+                message: `Contact with id ${id} not found!`,
+            });
 
-        db.query(q, id, (err, data) => {
-            if (err)
-                return res.status(400).json({
-                    success: false,
-                    message: err,
-                });
-
-            return res.json({ success: true, data: data[0] });
-        });
+        return res.json({ success: true, data: contact });
     } catch (error) {
         throw new Error(error);
     }
+};
+
+module.exports = {
+    getAllContacts,
+    getContactById,
+    createNewContact,
+    updateContact,
+    deleteContact,
 };
