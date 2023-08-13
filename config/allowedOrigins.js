@@ -1,3 +1,3 @@
-const allowedOrigins = ["http://localhost:3000", "https://www.contactapp.com"];
+const allowedOrigins = ["https://contactsapp-n5qu.onrender.com"];
 
 module.exports = allowedOrigins;
